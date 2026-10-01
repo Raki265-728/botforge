@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — BotForge{% endblock %}
+
+{% block nav %}
+<a href="/dashboard">Dashboard</a>
+<a href="/profile">Profile</a>
+<a href="/api/logout" onclick="event.preventDefault();logout()" class="nav-cta">Logout</a>
+{% endblock %}
+
+{% block body %}
+
+<div class="dash">
+  <div class="dh">
+    <h1>Dashboard <em>⚡</em></h1>
+    <div class="uchip">
+      <span id="userEmail" style="color:var(--txt2)"></span>
+      <div class="uav" id="userAvatar">U</div>
+    </div>
+  </div>
+
+  <div class="sg">
+    <div class="sc"><div class="scl">Total Bots</div><div class="scv" id="statTotal">0</div></div>
+    <div class="sc g"><div class="scl">Running</div><div class="scv" id="statRun" style="color:var(--green)">0</div></div>
+    <div class="sc r"><div class="scl">Stopped</div><div class="scv" id="statStop" style="color:var(--red)">0</div></div>
+    <div class="sc c"><div class="scl">CPU</div><div class="scv" id="statCpu" style="color:var(--cyan)">0<small>%</small></div></div>
+  </div>
+
+  <div class="dc">
+    <h2>🚀 Deploy New Bot</h2>
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('paste',this)">📝 Paste Code</button>
+      <button class="tab" onclick="switchTab('upload',this)">📤 Upload File</button>
+    </div>
+
+    <form id="pasteForm" class="tb active">
+      <div class="fld"><label>Bot Name</label><input name="name" placeholder="MyFirstBot" required></div>
+      <div class="fld"><label>Bot Token</label><input name="token" placeholder="123456:ABC-DEF..." required></div>
+      <div class="fld"><label>Admin Chat ID</label><input name="chat_id" placeholder="123456789" required></div>
+      <div class="fld"><label>Python Code</label><textarea name="code" required placeholder="import os, telebot&#10;bot = telebot.TeleBot(os.environ['BOT_TOKEN'])&#10;&#10;@bot.message_handler(commands=['start'])&#10;def start(m):&#10;    bot.reply_to(m, 'Hello!')&#10;&#10;bot.infinity_polling()"></textarea></div>
+      <button type="submit" class="btn btn-p btn-full">🚀 Deploy & Start</button>
+    </form>
+
+    <form id="uploadForm" class="tb" enctype="multipart/form-data">
+      <div class="fld"><label>Bot Name</label><input name="name" placeholder="MyFirstBot" required></div>
+      <div class="fld"><label>Bot Token</label><input name="token" placeholder="123456:ABC-DEF..." required></div>
+      <div class="fld"><label>Admin Chat ID</label><input name="chat_id" placeholder="123456789" required></div>
+      <div class="fld">
+        <label>File (.py, .js, .zip)</label>
+        <div class="fdrop" id="fileDrop">
+          <div class="fdri">📁</div>
+          <div class="fdrt"><strong>Click</strong> or drag file here<br><small style="color:var(--txt3)">.py, .js, .zip, .tar.gz (max 100MB)</small></div>
+          <input type="file" name="file" id="fileInput" accept=".py,.js,.zip,.tar,.gz" hidden required>
+        </div>
+        <div class="hint" id="fileName"></div>
+      </div>
+      <button type="submit" class="btn btn-p btn-full">📤 Upload & Deploy</button>
+    </form>
+  </div>
+
+  <div class="dc">
+    <h2>📁 Your Bots</h2>
+    <div id="botsContainer">
+      <div class="emp">
+        <div class="empi">📭</div>
+        <h3>No bots yet</h3>
+        <p>Deploy your first bot above to get started</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadMe() {
+  const me = await api('/api/me');
+  if (!me.ok) { location.href = '/'; return; }
+  document.getElementById('userEmail').textContent = me.email;
+  document.getElementById('userAvatar').textContent = me.email[0].toUpperCase();
+  if (!me.is_admin) {
+    const nav = document.querySelector('.nav-m');
+    nav.insertAdjacentHTML('afterbegin', '<a href="/admin">Admin</a>');
+  }
+  loadBots();
+  loadStats();
+  setInterval(loadStats, 5000);
+}
+
+async function loadStats() {
+  const d = await api('/api/stats');
+  if (!d.ok) return;
+  document.getElementById('statTotal').textContent = d.total;
+  document.getElementById('statRun').textContent = d.running;
+  document.getElementById('statStop').textContent = d.stopped;
+  document.getElementById('statCpu').innerHTML = d.cpu.toFixed(0) + '<small>%</small>';
+}
+
+async function loadBots() {
+  const d = await api('/api/bots');
+  const c = document.getElementById('botsContainer');
+  if (!d.ok || !d.bots.length) {
+    c.innerHTML = '<div class="emp"><div class="empi">📭</div><h3>No bots yet</h3><p>Deploy your first bot above</p></div>';
+    return;
+  }
+  c.innerHTML = '<div class="bgrid">' + d.bots.map(b => `
+    <div class="bc">
+      <div class="bh">
+        <div class="bn">${esc(b.name)}</div>
+        <span class="bs ${b.running?'on':'off'}">${b.running?'Running':'Stopped'}</span>
+      </div>
+      <div class="bm">ID: <code>${b.id}</code><br>Type: ${b.type||'python'} · ${(b.created_at||'').slice(0,16)}</div>
+      <div class="ba">
+        ${b.running
+          ? `<button class="bsp" onclick="ctrl('${b.id}','stop')">⏹ Stop</button>`
+          : `<button class="bst" onclick="ctrl('${b.id}','start')">▶ Start</button>`}
+        <button class="bsc" onclick="ctrl('${b.id}','restart')">🔁</button>
+        <button class="bsc" onclick="showLogs('${b.id}')">📄</button>
+        <button class="bsp" onclick="delBot('${b.id}')">🗑</button>
+      </div>
+    </div>`).join('') + '</div>';
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function ctrl(id, action) {
+  toast('⏳ ' + action + '...', 'info');
+  const r = await fetch(`/api/bot/${id}/${action}`, {method:'POST', credentials:'include'});
+  const d = await r.json();
+  if (d.ok) { toast('✅ Done', 'ok'); loadBots(); loadStats(); }
+  else toast('❌ ' + (d.error||'Failed'), 'err');
+}
+
+async function delBot(id) {
+  if (!confirm('Delete this bot?')) return;
+  const r = await fetch(`/api/bot/${id}/delete`, {method:'POST', credentials:'include'});
+  const d = await r.json();
+  if (d.ok) { toast('Deleted', 'ok'); loadBots(); loadStats(); }
+}
+
+function switchTab(which, btn) {
+  const p = btn.parentElement.parentElement;
+  p.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  p.querySelectorAll('.tb').forEach(b => b.classList.remove('active'));
+  document.getElementById(which === 'paste' ? 'pasteForm' : 'uploadForm').classList.add('active');
+}
+
+function bindForm(id, endpoint) {
+  const f = document.getElementById(id);
+  f.addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = f.querySelector('button[type=submit]');
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Processing...';
+    try {
+      const fd = new FormData(f);
+      const r = await fetch(endpoint, {method:'POST', body: fd, credentials:'include'});
+      const d = await r.json();
+      if (d.ok) {
+        toast('✅ Bot deployed!', 'ok');
+        f.reset();
+        loadBots(); loadStats();
+      } else {
+        toast('❌ ' + (d.error||'Failed'), 'err');
+      }
+    } catch (err) {
+      toast('❌ ' + err.message, 'err');
+    }
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  });
+}
+bindForm('pasteForm', '/api/deploy');
+bindForm('uploadForm', '/api/upload');
+
+const drop = document.getElementById('fileDrop');
+const input = document.getElementById('fileInput');
+if (drop) {
+  drop.addEventListener('click', () => input.click());
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('dg'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('dg'));
+  drop.addEventListener('drop', e => {
+    e.preventDefault();
+    drop.classList.remove('dg');
+    if (e.dataTransfer.files.length) { input.files = e.dataTransfer.files; updateName(); }
+  });
+  input.addEventListener('change', updateName);
+  function updateName() {
+    const n = document.getElementById('fileName');
+    n.textContent = input.files[0] ? '✅ ' + input.files[0].name : '';
+  }
+}
+
+loadMe();
+</script>
+{% endblock %}
