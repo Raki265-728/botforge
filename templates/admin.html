@@ -1,0 +1,199 @@
+{% extends "base.html" %}
+{% block title %}Admin Panel — BotForge{% endblock %}
+
+{% block nav %}
+<a href="/dashboard">Dashboard</a>
+<a href="/admin">Admin</a>
+<a href="/profile">Profile</a>
+<a href="/api/logout" onclick="event.preventDefault();logout()" class="nav-cta">Logout</a>
+{% endblock %}
+
+{% block body %}
+
+<div class="dash">
+  <div class="dh">
+    <h1>Admin Panel <em>🛡️</em></h1>
+    <div class="uchip">
+      <span style="color:var(--txt2)">Administrator</span>
+      <div class="uav">A</div>
+    </div>
+  </div>
+
+  <div class="sg">
+    <div class="sc"><div class="scl">Total Users</div><div class="scv" id="aUsers">0</div></div>
+    <div class="sc g"><div class="scl">Total Bots</div><div class="scv" id="aBots" style="color:var(--green)">0</div></div>
+    <div class="sc c"><div class="scl">Running</div><div class="scv" id="aRunning" style="color:var(--cyan)">0</div></div>
+    <div class="sc r"><div class="scl">Open Tickets</div><div class="scv" id="aTickets" style="color:var(--red)">0</div></div>
+  </div>
+
+  <div class="sg">
+    <div class="sc"><div class="scl">CPU</div><div class="scv" id="aCpu">0<small>%</small></div></div>
+    <div class="sc"><div class="scl">Memory</div><div class="scv" id="aMem">0<small>%</small></div></div>
+    <div class="sc"><div class="scl">Disk</div><div class="scv" id="aDisk">0<small>%</small></div></div>
+  </div>
+
+  <div class="dc">
+    <h2>📢 Broadcast Announcement</h2>
+    <form id="annForm">
+      <div class="fld"><label>Title</label><input name="title" placeholder="Announcement title" required></div>
+      <div class="fld"><label>Message</label><textarea name="body" placeholder="Type your announcement..." style="min-height:120px" required></textarea></div>
+      <button type="submit" class="btn btn-p">📢 Send Announcement</button>
+    </form>
+  </div>
+
+  <div class="dc">
+    <h2>👥 Users</h2>
+    <div id="usersTable" style="overflow-x:auto">
+      <p style="color:var(--txt3)">Loading...</p>
+    </div>
+  </div>
+
+  <div class="dc">
+    <h2>📁 All Bots</h2>
+    <div id="botsTable" style="overflow-x:auto">
+      <p style="color:var(--txt3)">Loading...</p>
+    </div>
+  </div>
+
+  <div class="dc">
+    <h2>🎫 Support Tickets</h2>
+    <div id="ticketsTable" style="overflow-x:auto">
+      <p style="color:var(--txt3)">Loading...</p>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadStats() {
+  const d = await api('/api/admin/stats');
+  if (!d.ok) { toast('❌ ' + (d.error||'Failed'), 'err'); return; }
+  document.getElementById('aUsers').textContent = d.total_users;
+  document.getElementById('aBots').textContent = d.total_bots;
+  document.getElementById('aRunning').textContent = d.running_bots;
+  document.getElementById('aTickets').textContent = d.open_tickets;
+  document.getElementById('aCpu').innerHTML = d.cpu.toFixed(0) + '<small>%</small>';
+  document.getElementById('aMem').innerHTML = d.mem.toFixed(0) + '<small>%</small>';
+  document.getElementById('aDisk').innerHTML = d.disk.toFixed(0) + '<small>%</small>';
+}
+
+async function loadUsers() {
+  const d = await api('/api/admin/users');
+  if (!d.ok) return;
+  if (!d.users.length) {
+    document.getElementById('usersTable').innerHTML = '<p style="color:var(--txt3)">No users yet</p>';
+    return;
+  }
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="border-bottom:1px solid var(--border);text-align:left"><th style="padding:10px;color:var(--txt3)">ID</th><th style="padding:10px;color:var(--txt3)">Email</th><th style="padding:10px;color:var(--txt3)">Plan</th><th style="padding:10px;color:var(--txt3)">Status</th><th style="padding:10px;color:var(--txt3)">Actions</th></tr></thead><tbody>';
+  d.users.forEach(u => {
+    html += `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:10px">${u.id}</td>
+      <td style="padding:10px">${esc(u.email)}${u.is_admin?' <span style="color:var(--acc);font-size:10px">[ADMIN]</span>':''}</td>
+      <td style="padding:10px"><span style="text-transform:uppercase;font-size:11px;padding:2px 8px;border-radius:100px;background:rgba(124,92,255,.15);color:var(--acc)">${u.plan||'free'}</span></td>
+      <td style="padding:10px">${u.is_banned?'<span style="color:var(--red)">Banned</span>':'<span style="color:var(--green)">Active</span>'}</td>
+      <td style="padding:10px">
+        <button class="bsc" style="padding:5px 10px;font-size:11px" onclick="banUser(${u.id}, ${u.is_banned?0:1})">${u.is_banned?'Unban':'Ban'}</button>
+        <button class="bsp" style="padding:5px 10px;font-size:11px;margin-left:4px" onclick="delUser(${u.id})">Delete</button>
+      </td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  document.getElementById('usersTable').innerHTML = html;
+}
+
+async function loadBots() {
+  const d = await api('/api/admin/bots');
+  if (!d.ok) return;
+  if (!d.bots.length) {
+    document.getElementById('botsTable').innerHTML = '<p style="color:var(--txt3)">No bots yet</p>';
+    return;
+  }
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr style="border-bottom:1px solid var(--border);text-align:left"><th style="padding:10px;color:var(--txt3)">ID</th><th style="padding:10px;color:var(--txt3)">Name</th><th style="padding:10px;color:var(--txt3)">Owner</th><th style="padding:10px;color:var(--txt3)">Status</th></tr></thead><tbody>';
+  d.bots.forEach(b => {
+    html += `<tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:10px"><code style="font-size:11px">${b.id}</code></td>
+      <td style="padding:10px">${esc(b.name)}</td>
+      <td style="padding:10px;color:var(--txt2)">${esc(b.email||'?')}</td>
+      <td style="padding:10px">${b.running?'<span style="color:var(--green)">● Running</span>':'<span style="color:var(--red)">● Stopped</span>'}</td>
+    </tr>`;
+  });
+  html += '</tbody></table>';
+  document.getElementById('botsTable').innerHTML = html;
+}
+
+async function loadTickets() {
+  const d = await api('/api/admin/tickets');
+  if (!d.ok) return;
+  if (!d.tickets.length) {
+    document.getElementById('ticketsTable').innerHTML = '<p style="color:var(--txt3)">No tickets yet</p>';
+    return;
+  }
+  let html = '<div style="display:grid;gap:12px">';
+  d.tickets.forEach(t => {
+    html += `<div style="background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:12px;padding:16px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+        <strong>${esc(t.subject)}</strong>
+        <span style="font-size:11px;padding:3px 10px;border-radius:100px;background:${t.status==='open'?'rgba(239,68,68,.15);color:var(--red)':'rgba(16,185,129,.15);color:var(--green)'}">${t.status}</span>
+      </div>
+      <div style="color:var(--txt3);font-size:12px;margin-bottom:8px">From: ${esc(t.email||'?')}</div>
+      <div style="color:var(--txt2);font-size:13px;margin-bottom:12px">${esc(t.message)}</div>
+      ${t.reply?`<div style="padding:10px;background:rgba(124,92,255,.1);border-radius:8px;font-size:13px;margin-bottom:8px"><strong>Your reply:</strong> ${esc(t.reply)}</div>`:''}
+      <div style="display:flex;gap:6px">
+        <input id="reply-${t.id}" placeholder="Type reply..." style="flex:1;padding:8px;background:rgba(0,0,0,.4);border:1px solid var(--border2);border-radius:8px;color:var(--txt);font-size:13px">
+        <button class="btn btn-p" style="padding:8px 16px;font-size:13px" onclick="replyTicket(${t.id})">Reply</button>
+      </div>
+    </div>`;
+  });
+  html += '</div>';
+  document.getElementById('ticketsTable').innerHTML = html;
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function banUser(uid, val) {
+  const fd = new FormData();
+  fd.append('action', val ? 'ban' : 'unban');
+  const r = await fetch(`/api/admin/user/${uid}/ban`, {method:'POST', body: fd, credentials:'include'});
+  const d = await r.json();
+  if (d.ok) { toast('✅ Done', 'ok'); loadUsers(); loadStats(); }
+  else toast('❌ ' + d.error, 'err');
+}
+
+async function delUser(uid) {
+  if (!confirm('Delete this user permanently?')) return;
+  const r = await fetch(`/api/admin/user/${uid}/delete`, {method:'POST', credentials:'include'});
+  const d = await r.json();
+  if (d.ok) { toast('Deleted', 'ok'); loadUsers(); loadStats(); }
+  else toast('❌ ' + d.error, 'err');
+}
+
+async function replyTicket(tid) {
+  const input = document.getElementById('reply-' + tid);
+  const fd = new FormData();
+  fd.append('reply', input.value);
+  const r = await fetch(`/api/admin/ticket/${tid}/reply`, {method:'POST', body: fd, credentials:'include'});
+  const d = await r.json();
+  if (d.ok) { toast('✅ Replied', 'ok'); loadTickets(); loadStats(); }
+  else toast('❌ ' + d.error, 'err');
+}
+
+document.getElementById('annForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const r = await fetch('/api/admin/announcement', {method:'POST', body: fd, credentials:'include'});
+  const d = await r.json();
+  if (d.ok) { toast('✅ Announcement sent!', 'ok'); e.target.reset(); }
+  else toast('❌ ' + d.error, 'err');
+});
+
+loadStats();
+loadUsers();
+loadBots();
+loadTickets();
+setInterval(loadStats, 10000);
+</script>
+{% endblock %}
