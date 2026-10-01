@@ -1,0 +1,196 @@
+{% extends "base.html" %}
+{% block title %}Profile — BotForge{% endblock %}
+
+{% block nav %}
+<a href="/dashboard">Dashboard</a>
+<a href="/profile">Profile</a>
+<a href="/api/logout" onclick="event.preventDefault();logout()" class="nav-cta">Logout</a>
+{% endblock %}
+
+{% block body %}
+
+<div class="dash">
+  <div class="dh">
+    <h1>Profile <em>👤</em></h1>
+    <div class="uchip">
+      <span id="userEmail" style="color:var(--txt2)"></span>
+      <div class="uav" id="userAvatar">U</div>
+    </div>
+  </div>
+
+  <div class="sg">
+    <div class="sc"><div class="scl">Current Plan</div><div class="scv" id="pPlan" style="text-transform:uppercase">free</div></div>
+    <div class="sc g"><div class="scl">Credits</div><div class="scv" id="pCredits" style="color:var(--green)">0</div></div>
+    <div class="sc c"><div class="scl">Referrals</div><div class="scv" id="pRefs" style="color:var(--cyan)">0</div></div>
+  </div>
+
+  <div class="dc">
+    <h2>🔑 API Key</h2>
+    <div class="fld">
+      <label>Your API Key</label>
+      <input id="apiKey" readonly style="font-family:monospace;font-size:12px">
+      <div class="hint">Use this key for programmatic access</div>
+    </div>
+    <button class="btn btn-g" onclick="regenApiKey()">🔄 Regenerate Key</button>
+  </div>
+
+  <div class="dc">
+    <h2>🔒 Change Password</h2>
+    <form id="pwForm">
+      <div class="fld"><label>Current Password</label><input type="password" name="old" required></div>
+      <div class="fld"><label>New Password</label><input type="password" name="new" required minlength="6"></div>
+      <button type="submit" class="btn btn-p">Update Password</button>
+    </form>
+  </div>
+
+  <div class="dc">
+    <h2>🎁 Referral Program</h2>
+    <p style="color:var(--txt2);font-size:14px;margin-bottom:14px">Share your referral code and earn credits</p>
+    <div class="fld">
+      <label>Your Referral Code</label>
+      <input id="refCode" readonly style="font-family:monospace">
+    </div>
+    <button class="btn btn-g" onclick="copyRef()">📋 Copy Referral Link</button>
+  </div>
+
+  <div class="dc">
+    <h2>💳 Plans</h2>
+    <div class="prc" id="plansContainer" style="max-width:100%">
+      <p style="color:var(--txt3)">Loading plans...</p>
+    </div>
+  </div>
+
+  <div class="dc">
+    <h2>📊 Activity Log</h2>
+    <div id="activityList" style="max-height:400px;overflow:auto">
+      <p style="color:var(--txt3)">Loading...</p>
+    </div>
+  </div>
+
+  <div class="dc">
+    <h2>🎫 Support Tickets</h2>
+    <form id="ticketForm" style="margin-bottom:20px">
+      <div class="fld"><label>Subject</label><input name="subject" placeholder="Brief subject" required></div>
+      <div class="fld"><label>Message</label><textarea name="message" placeholder="Describe your issue..." style="min-height:120px" required></textarea></div>
+      <button type="submit" class="btn btn-p">📩 Submit Ticket</button>
+    </form>
+    <div id="ticketsList">
+      <p style="color:var(--txt3)">Loading...</p>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadMe() {
+  const me = await api('/api/me');
+  if (!me.ok) { location.href = '/'; return; }
+  document.getElementById('userEmail').textContent = me.email;
+  document.getElementById('userAvatar').textContent = me.email[0].toUpperCase();
+  document.getElementById('apiKey').value = me.api_key || '-';
+  document.getElementById('refCode').value = me.referral_code || '-';
+  document.getElementById('pPlan').textContent = me.plan || 'free';
+  document.getElementById('pCredits').textContent = (me.credits || 0).toFixed(2);
+  loadReferrals();
+  loadPlans();
+  loadActivity();
+  loadTickets();
+}
+
+async function loadReferrals() {
+  const d = await api('/api/referrals');
+  if (d.ok) document.getElementById('pRefs').textContent = d.count;
+}
+
+async function loadPlans() {
+  const d = await api('/api/billing/plans');
+  if (!d.ok) return;
+  const c = document.getElementById('plansContainer');
+  c.innerHTML = d.plans.map(p => `
+    <div class="pl ${p.id==='pro'?'f':''}">
+      <h3>${p.name}</h3>
+      <p class="plsub">${p.bots} bots</p>
+      <div class="plp">৳${p.price}<small>/mo</small></div>
+      <button class="btn ${p.id==='pro'?'btn-p':'btn-g'} btn-full" onclick="upgrade('${p.id}')">${p.id==='free'?'Current':'Choose'}</button>
+    </div>`).join('');
+}
+
+async function upgrade(plan) {
+  const fd = new FormData();
+  fd.append('plan', plan);
+  const r = await fetch('/api/billing/upgrade', {method:'POST', body: fd, credentials:'include'});
+  const d = await r.json();
+  if (d.ok) { toast('✅ Plan updated', 'ok'); loadMe(); }
+  else toast('❌ ' + d.error, 'err');
+}
+
+async function loadActivity() {
+  const d = await api('/api/profile/activity');
+  if (!d.ok || !d.items.length) {
+    document.getElementById('activityList').innerHTML = '<p style="color:var(--txt3)">No activity yet</p>';
+    return;
+  }
+  document.getElementById('activityList').innerHTML = d.items.map(a => `
+    <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px">
+      <div><strong style="color:var(--acc);text-transform:uppercase;font-size:11px">${a.action}</strong> ${a.detail?`<span style="color:var(--txt2);margin-left:8px">${esc(a.detail)}</span>`:''}</div>
+      <div style="color:var(--txt3);font-size:11px">${(a.at||'').slice(0,16)}</div>
+    </div>`).join('');
+}
+
+async function loadTickets() {
+  const d = await api('/api/tickets');
+  if (!d.ok || !d.tickets.length) {
+    document.getElementById('ticketsList').innerHTML = '<p style="color:var(--txt3)">No tickets yet</p>';
+    return;
+  }
+  document.getElementById('ticketsList').innerHTML = d.tickets.map(t => `
+    <div style="background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:8px">
+        <strong>${esc(t.subject)}</strong>
+        <span style="font-size:11px;padding:3px 10px;border-radius:100px;background:${t.status==='open'?'rgba(239,68,68,.15);color:var(--red)':'rgba(16,185,129,.15);color:var(--green)'}">${t.status}</span>
+      </div>
+      <div style="color:var(--txt2);font-size:13px">${esc(t.message)}</div>
+      ${t.reply?`<div style="margin-top:12px;padding:10px;background:rgba(124,92,255,.1);border-radius:8px;font-size:13px"><strong>Admin reply:</strong> ${esc(t.reply)}</div>`:''}
+    </div>`).join('');
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function regenApiKey() {
+  if (!confirm('Regenerate API key? Old key will stop working.')) return;
+  const r = await fetch('/api/profile/regen-api-key', {method:'POST', credentials:'include'});
+  const d = await r.json();
+  if (d.ok) { document.getElementById('apiKey').value = d.api_key; toast('✅ New API key generated', 'ok'); }
+}
+
+function copyRef() {
+  const code = document.getElementById('refCode').value;
+  const link = location.origin + '/?ref=' + code;
+  navigator.clipboard.writeText(link).then(() => toast('✅ Link copied!', 'ok'));
+}
+
+document.getElementById('pwForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const r = await fetch('/api/profile/change-password', {method:'POST', body: fd, credentials:'include'});
+  const d = await r.json();
+  if (d.ok) { toast('✅ Password updated', 'ok'); e.target.reset(); }
+  else toast('❌ ' + d.error, 'err');
+});
+
+document.getElementById('ticketForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const r = await fetch('/api/tickets', {method:'POST', body: fd, credentials:'include'});
+  const d = await r.json();
+  if (d.ok) { toast('✅ Ticket submitted', 'ok'); e.target.reset(); loadTickets(); }
+  else toast('❌ ' + d.error, 'err');
+});
+
+loadMe();
+</script>
+{% endblock %}
